@@ -44,6 +44,10 @@ go build
 ./shortener -P 80 # set port at 80
 ```
 
+## pgo optimization
+ 
+[pgo.sh](./pgo.sh)
+
 ## about
 
 Those components were used to build this project
