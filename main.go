@@ -12,8 +12,10 @@ import (
 	"time"
 
 	"github.com/alphadose/haxmap"
+	"github.com/arl/statsviz"
 	"github.com/dgraph-io/badger/v4"
 	"github.com/gin-contrib/gzip"
+	"github.com/gin-contrib/pprof"
 	ginzap "github.com/gin-contrib/zap"
 	"github.com/gin-gonic/gin"
 	"github.com/spaolacci/murmur3"
@@ -184,6 +186,16 @@ func main() {
 		}
 		c.Redirect(http.StatusFound, url.Url)
 	})
+
+	app.GET("/debug/statsviz/*filepath", func(context *gin.Context) {
+		if context.Param("filepath") == "/ws" {
+			statsviz.Ws(context.Writer, context.Request)
+			return
+		}
+		statsviz.IndexAtRoot("/debug/statsviz").ServeHTTP(context.Writer, context.Request)
+	})
+
+	pprof.Register(app)
 
 	srv := &http.Server{
 		Addr:    ":" + *port,

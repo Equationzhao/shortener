@@ -4,8 +4,10 @@ go 1.21
 
 require (
 	github.com/alphadose/haxmap v1.3.0
+	github.com/arl/statsviz v0.5.2
 	github.com/dgraph-io/badger/v4 v4.2.0
 	github.com/gin-contrib/gzip v0.0.6
+	github.com/gin-contrib/pprof v1.4.0
 	github.com/gin-contrib/zap v0.2.0
 	github.com/gin-gonic/gin v1.9.1
 	github.com/spaolacci/murmur3 v1.1.0
@@ -34,6 +36,7 @@ require (
 	github.com/golang/snappy v0.0.3 // indirect
 	github.com/google/flatbuffers v1.12.1 // indirect
 	github.com/google/go-cmp v0.5.9 // indirect
+	github.com/gorilla/websocket v1.4.2 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/compress v1.16.3 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.5 // indirect
