@@ -122,12 +122,12 @@ func main() {
 				expiration = uint64(time.Now().Add(duration).Unix())
 			}
 			v, loaded := mp.GetOrSet(res, toStore{
-				Url:       urlToStore,
+				Url:       url,
 				ExpiredAt: expiration,
 			})
 			if !loaded { // not exist and insert
 				err := db.Update(func(txn *badger.Txn) error {
-					e := badger.NewEntry([]byte(res), []byte(urlToStore))
+					e := badger.NewEntry([]byte(res), []byte(url))
 					if duration > 0 {
 						e = e.WithTTL(duration)
 					}
