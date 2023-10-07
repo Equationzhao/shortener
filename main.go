@@ -172,6 +172,10 @@ func main() {
 			c.JSONP(http.StatusOK, gin.H{"shortened": hash})
 		})
 
+	app.GET("/", func(c *gin.Context) {
+		c.JSON(http.StatusOK, mp)
+	})
+
 	app.GET("/:hash", func(c *gin.Context) {
 		hash := c.Param("hash")
 		url, ok := mp.Get(hash)
@@ -187,15 +191,17 @@ func main() {
 		c.Redirect(http.StatusFound, url.Url)
 	})
 
-	app.GET("/debug/statsviz/*filepath", func(context *gin.Context) {
-		if context.Param("filepath") == "/ws" {
-			statsviz.Ws(context.Writer, context.Request)
-			return
-		}
-		statsviz.IndexAtRoot("/debug/statsviz").ServeHTTP(context.Writer, context.Request)
-	})
+	if debug {
+		app.GET("/debug/statsviz/*filepath", func(context *gin.Context) {
+			if context.Param("filepath") == "/ws" {
+				statsviz.Ws(context.Writer, context.Request)
+				return
+			}
+			statsviz.IndexAtRoot("/debug/statsviz").ServeHTTP(context.Writer, context.Request)
+		})
 
-	pprof.Register(app)
+		pprof.Register(app)
+	}
 
 	srv := &http.Server{
 		Addr:    ":" + *port,
