@@ -173,18 +173,23 @@ func main() {
 		})
 
 	app.GET("/", func(c *gin.Context) {
-		c.JSON(http.StatusOK, mp)
+		code, ok := c.GetQuery("code")
+		if !ok {
+			c.JSON(http.StatusOK, mp)
+			return
+		}
+		c.Redirect(http.StatusFound, "/"+code)
 	})
 
-	app.GET("/:hash", func(c *gin.Context) {
-		hash := c.Param("hash")
-		url, ok := mp.Get(hash)
+	app.GET("/:code", func(c *gin.Context) {
+		code := c.Param("code")
+		url, ok := mp.Get(code)
 		if !ok {
 			c.JSONP(http.StatusNotFound, gin.H{"error": "not found"})
 			return
 		}
 		if url.ExpiredAt != 0 && url.ExpiredAt < uint64(time.Now().Unix()) {
-			mp.Del(hash)
+			mp.Del(code)
 			c.JSONP(http.StatusNotFound, gin.H{"error": "not found"})
 			return
 		}
