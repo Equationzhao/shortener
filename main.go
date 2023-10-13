@@ -1,14 +1,17 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"slices"
+	"syscall"
 	"time"
 
 	"github.com/alphadose/haxmap"
@@ -23,6 +26,8 @@ import (
 	"github.com/ulule/limiter/v3"
 	m "github.com/ulule/limiter/v3/drivers/middleware/gin"
 	"github.com/ulule/limiter/v3/drivers/store/memory"
+	"github.com/yeqown/go-qrcode/v2"
+	"github.com/yeqown/go-qrcode/writer/standard"
 	"go.uber.org/zap"
 )
 
@@ -33,8 +38,9 @@ func init() {
 }
 
 type toShortened struct {
-	Url      string        `json:"url"`
-	Duration time.Duration `json:"duration"`
+	Shortened string        `json:"shortened"`
+	Url       string        `json:"url"`
+	Duration  time.Duration `json:"duration"`
 }
 
 type toStore struct {
@@ -160,6 +166,36 @@ func main() {
 				c.JSONP(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
+
+			if toShort.Shortened != "" {
+				expiration := uint64(0)
+				if toShort.Duration != 0 {
+					expiration = uint64(time.Now().Add(toShort.Duration).Unix())
+				}
+
+				_, loaded := mp.GetOrSet(toShort.Shortened, toStore{
+					Url:       toShort.Url,
+					ExpiredAt: expiration,
+				})
+				if loaded {
+					c.JSONP(http.StatusAccepted, gin.H{"error": ErrAlreadyExist.Error()})
+					return
+				} else {
+					err := db.Update(func(txn *badger.Txn) error {
+						e := badger.NewEntry([]byte(toShort.Shortened), []byte(toShort.Url))
+						if toShort.Duration > 0 {
+							e = e.WithTTL(toShort.Duration)
+						}
+						return txn.SetEntry(e)
+					})
+					if err != nil {
+						c.JSONP(http.StatusInternalServerError, gin.H{"error": err.Error()})
+						return
+					}
+					c.JSONP(http.StatusOK, gin.H{"shortened": toShort.Shortened})
+					return
+				}
+			}
 			hash, err := hashingAndStore(toShort.Url, toShort.Duration)
 			if err != nil {
 				if errors.Is(err, ErrAlreadyExist) {
@@ -208,12 +244,51 @@ func main() {
 		pprof.Register(app)
 	}
 
+	app.POST("/qr/:code", func(c *gin.Context) {
+		code := c.Param("code")
+		url, ok := mp.Get(code)
+		if !ok {
+			c.JSONP(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
+		if url.ExpiredAt != 0 && url.ExpiredAt < uint64(time.Now().Unix()) {
+			mp.Del(code)
+			c.JSONP(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
+		qrc, err := qrcode.NewWith(url.Url, qrcode.WithEncodingMode(qrcode.EncModeByte))
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+		var w io.WriteCloser = &MyWriteCloser{
+			bufio.NewWriter(c.Writer),
+		}
+		qrc.Save(standard.NewWithWriter(w, standard.WithBgTransparent(), standard.WithQRWidth(10)))
+	})
+
 	srv := &http.Server{
 		Addr:    ":" + *port,
 		Handler: app,
 	}
 	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, os.Interrupt)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+
+	// clean map per hour
+	go func() {
+		t := time.NewTicker(time.Hour)
+		defer t.Stop()
+
+		for range t.C {
+			toDel := make([]string, 0)
+			mp.ForEach(func(s string, store toStore) bool {
+				if store.ExpiredAt != 0 && store.ExpiredAt < uint64(time.Now().Unix()) {
+					toDel = append(toDel, s)
+				}
+				return true
+			})
+			mp.Del(toDel...)
+		}
+	}()
 
 	go func() {
 		err := srv.ListenAndServe()
@@ -230,4 +305,12 @@ func main() {
 		zap.L().Fatal("Server Shutdown:", zap.Error(err))
 	}
 	zap.L().Info("Server exiting")
+}
+
+type MyWriteCloser struct {
+	*bufio.Writer
+}
+
+func (mwc *MyWriteCloser) Close() error {
+	return mwc.Flush()
 }
