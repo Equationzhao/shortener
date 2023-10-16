@@ -260,7 +260,7 @@ func main() {
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		}
-		var w io.WriteCloser = &MyWriteCloser{
+		var w io.WriteCloser = &WC{
 			bufio.NewWriter(c.Writer),
 		}
 		qrc.Save(standard.NewWithWriter(w, standard.WithBgTransparent(), standard.WithQRWidth(10)))
@@ -307,10 +307,10 @@ func main() {
 	zap.L().Info("Server exiting")
 }
 
-type MyWriteCloser struct {
+type WC struct {
 	*bufio.Writer
 }
 
-func (mwc *MyWriteCloser) Close() error {
-	return mwc.Flush()
+func (wc *WC) Close() error {
+	return wc.Flush()
 }
