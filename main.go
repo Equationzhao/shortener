@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -15,7 +14,6 @@ import (
 	"time"
 
 	"github.com/alphadose/haxmap"
-	"github.com/arl/statsviz"
 	"github.com/dgraph-io/badger/v4"
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-contrib/pprof"
@@ -53,12 +51,13 @@ var db *badger.DB
 func getDB() *badger.DB {
 	db, err := badger.Open(badger.DefaultOptions("./db").WithLoggingLevel(badger.ERROR))
 	if err != nil {
-		log.Fatal(err)
+		zap.L().Fatal("failed to open db", zap.Error(err))
 	}
 	return db
 }
 
 func loadDB() *haxmap.Map[string, toStore] {
+	zap.L().Info("loading db...")
 	mp := haxmap.New[string, toStore](8)
 	err := db.View(func(txn *badger.Txn) error {
 		defer txn.Commit()
@@ -76,7 +75,6 @@ func loadDB() *haxmap.Map[string, toStore] {
 				Url:       string(valCopy),
 				ExpiredAt: item.ExpiresAt(),
 			}
-
 			mp.Set(string(item.Key()), s)
 		}
 		return nil
@@ -155,7 +153,6 @@ func main() {
 	gin.SetMode(gin.ReleaseMode)
 	app := gin.New()
 	app.Use(ginzap.Ginzap(zap.L(), time.RFC3339, true))
-	ginzap.RecoveryWithZap(zap.L(), true)
 	app.Use(gzip.Gzip(gzip.DefaultCompression))
 	rate, _ := limiter.NewRateFromFormatted("10-M")
 	app.POST("/shorten", m.NewMiddleware(limiter.New(memory.NewStore(), rate)),
@@ -233,14 +230,6 @@ func main() {
 	})
 
 	if debug {
-		app.GET("/debug/statsviz/*filepath", func(context *gin.Context) {
-			if context.Param("filepath") == "/ws" {
-				statsviz.Ws(context.Writer, context.Request)
-				return
-			}
-			statsviz.IndexAtRoot("/debug/statsviz").ServeHTTP(context.Writer, context.Request)
-		})
-
 		pprof.Register(app)
 	}
 
@@ -292,7 +281,7 @@ func main() {
 
 	go func() {
 		err := srv.ListenAndServe()
-		if err != nil {
+		if err != http.ErrServerClosed {
 			zap.L().Error("error running", zap.Error(err))
 		}
 	}()
