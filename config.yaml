@@ -1,0 +1,8 @@
+ip_limit: 60-M
+db_path: ./db
+port: 80
+shutdown_timeout: 5
+clean_interval: 1
+seed: 0
+clean_batch_size: 10000
+cache_initialization_size: 10000
