@@ -9,7 +9,9 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"slices"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -20,7 +22,6 @@ import (
 	ginzap "github.com/gin-contrib/zap"
 	"github.com/gin-gonic/gin"
 	"github.com/spaolacci/murmur3"
-	"github.com/spf13/pflag"
 	"github.com/ulule/limiter/v3"
 	m "github.com/ulule/limiter/v3/drivers/middleware/gin"
 	"github.com/ulule/limiter/v3/drivers/store/memory"
@@ -32,7 +33,19 @@ import (
 func init() {
 	l, _ := zap.NewProduction()
 	zap.ReplaceGlobals(l)
-	db = getDB()
+	userConfigDie, err := os.UserConfigDir()
+	if err != nil {
+		zap.L().Fatal("failed to get user config dir", zap.Error(err))
+	}
+	configFile, err := os.ReadFile(filepath.Join(userConfigDie, "shortener", "config.yaml"))
+	if err != nil {
+		zap.L().Fatal("failed to read config", zap.Error(err))
+	}
+	err = loadConfig(configFile)
+	if err != nil {
+		zap.L().Fatal("failed to load config", zap.Error(err))
+	}
+	db = getDB(Config.DBPath)
 }
 
 type toShortened struct {
@@ -48,8 +61,8 @@ type toStore struct {
 
 var db *badger.DB
 
-func getDB() *badger.DB {
-	db, err := badger.Open(badger.DefaultOptions("./db").WithLoggingLevel(badger.ERROR))
+func getDB(path string) *badger.DB {
+	db, err := badger.Open(badger.DefaultOptions(path).WithLoggingLevel(badger.ERROR))
 	if err != nil {
 		zap.L().Fatal("failed to open db", zap.Error(err))
 	}
@@ -58,7 +71,7 @@ func getDB() *badger.DB {
 
 func loadDB() *haxmap.Map[string, toStore] {
 	zap.L().Info("loading db...")
-	mp := haxmap.New[string, toStore](8)
+	mp := haxmap.New[string, toStore](uintptr(Config.CacheInitializationSize))
 	err := db.View(func(txn *badger.Txn) error {
 		defer txn.Commit()
 		iterator := txn.NewIterator(badger.DefaultIteratorOptions)
@@ -94,9 +107,8 @@ var map62 = map[uint32]byte{
 }
 
 func main() {
-	port := pflag.StringP("port", "P", "80", "running port")
-	pflag.Parse()
-
+	port := Config.Port
+	zap.L().Info("running port", zap.Uint16("port", port))
 	mp := loadDB()
 	defer db.Close()
 
@@ -154,7 +166,7 @@ func main() {
 	app := gin.New()
 	app.Use(ginzap.Ginzap(zap.L(), time.RFC3339, true))
 	app.Use(gzip.Gzip(gzip.DefaultCompression))
-	rate, _ := limiter.NewRateFromFormatted("10-M")
+	rate, _ := limiter.NewRateFromFormatted(Config.IPlimit)
 	app.POST("/shorten", m.NewMiddleware(limiter.New(memory.NewStore(), rate)),
 		func(c *gin.Context) {
 			toShort := toShortened{}
@@ -229,9 +241,7 @@ func main() {
 		c.Redirect(http.StatusFound, url.Url)
 	})
 
-	if debug {
-		pprof.Register(app)
-	}
+	pprof.Register(app)
 
 	app.POST("/qr/:code", func(c *gin.Context) {
 		code := c.Param("code")
@@ -256,28 +266,40 @@ func main() {
 	})
 
 	srv := &http.Server{
-		Addr:    ":" + *port,
+		Addr:    ":" + strconv.Itoa(int(port)),
 		Handler: app,
 	}
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 
-	// clean map per hour
-	go func() {
-		t := time.NewTicker(time.Hour)
-		defer t.Stop()
-
-		for range t.C {
-			toDel := make([]string, 0)
-			mp.ForEach(func(s string, store toStore) bool {
-				if store.ExpiredAt != 0 && store.ExpiredAt < uint64(time.Now().Unix()) {
-					toDel = append(toDel, s)
+	// clean map
+	if Config.CleanInterval != 0 {
+		toDelSize := int(max(Config.CleanBatchSize, 1000))
+		zap.L().Info("start clean map...", zap.Uint16("interval(minute)", Config.CleanInterval), zap.Int("batch size", toDelSize))
+		go func() {
+			defer func() {
+				if err := recover(); err != nil {
+					zap.L().Error("clean map panic", zap.Any("err", err))
 				}
-				return true
-			})
-			mp.Del(toDel...)
-		}
-	}()
+			}()
+			for {
+				time.Sleep(time.Minute * time.Duration(Config.CleanInterval))
+				zap.L().Info("clean map start")
+				toDel := make([]string, 0, toDelSize)
+				mp.ForEach(func(s string, store toStore) bool {
+					if len(toDel) >= toDelSize {
+						return false
+					}
+					if store.ExpiredAt != 0 && store.ExpiredAt < uint64(time.Now().Unix()) {
+						toDel = append(toDel, s)
+					}
+					return true
+				})
+				zap.L().Info("clean map", zap.Int("count", len(toDel)))
+				mp.Del(toDel...)
+			}
+		}()
+	}
 
 	go func() {
 		err := srv.ListenAndServe()
@@ -288,7 +310,7 @@ func main() {
 
 	<-quit
 	zap.L().Info("Shutdown Server ...")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(Config.ShutdownTimeout)*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
 		zap.L().Fatal("Server Shutdown:", zap.Error(err))
