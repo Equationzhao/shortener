@@ -10,7 +10,6 @@ require (
 	github.com/gin-contrib/zap v0.2.0
 	github.com/gin-gonic/gin v1.9.1
 	github.com/spaolacci/murmur3 v1.1.0
-	github.com/spf13/pflag v1.0.5
 	github.com/ulule/limiter/v3 v3.11.2
 	go.uber.org/zap v1.26.0
 )
@@ -65,5 +64,5 @@ require (
 	golang.org/x/sys v0.16.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
 	google.golang.org/protobuf v1.32.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
+	gopkg.in/yaml.v3 v3.0.1
 )
