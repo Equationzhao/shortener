@@ -2,6 +2,17 @@
 
 > url shortener
 
+## Config
+
+copy the [config.yaml](config.yaml) to $UserConfigDir/shortener/config.yaml
+
+```
+$UserConfigDir is the user configuration directory
+On Darwin, it is $HOME/Library/Application Support.
+On Windows, it is %AppData%.
+On Plan 9, it is $home/lib.
+```
+
 ## API
 
 ### Register
